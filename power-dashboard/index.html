@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Strom-Dashboard</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1b1f24;--mut:#6b7280;--bd:#e5e7eb;--a:#2563eb;--b:#d97706;--c:#059669;--r:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#181c22;--fg:#e6e8eb;--mut:#8b93a0;--bd:#262c35;--a:#60a5fa;--b:#fbbf24;--c:#34d399;--r:#f87171}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px system-ui,sans-serif;padding:16px;max-width:1100px;margin:auto}
+h1{font-size:18px;margin:0 0 12px}.sub{color:var(--mut);font-size:13px;font-weight:400}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px}
+.l{color:var(--mut);font-size:12px}.v{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums}.u{font-size:13px;color:var(--mut);font-weight:400}
+.bar{height:8px;background:var(--bd);border-radius:4px;overflow:hidden;margin-top:8px}.bar i{display:block;height:100%;background:var(--c);transition:width .5s}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;margin-bottom:12px}
+canvas{width:100%;height:150px;display:block}
+table{width:100%;border-collapse:collapse}td{padding:4px 0;border-bottom:1px solid var(--bd)}td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+</style></head><body>
+<h1>Strom-Dashboard <span class="sub" id="st">…</span></h1>
+<div class="grid">
+ <div class="card"><div class="l">Akkustand</div><div class="v"><span id="pct">–</span><span class="u"> %</span></div><div class="bar"><i id="bar"></i></div></div>
+ <div class="card"><div class="l">Leistung</div><div class="v"><span id="pw">–</span><span class="u"> W</span></div></div>
+ <div class="card"><div class="l">Spannung</div><div class="v"><span id="vo">–</span><span class="u"> V</span></div></div>
+ <div class="card"><div class="l">Strom (P/U)</div><div class="v"><span id="cu">–</span><span class="u"> A</span></div></div>
+ <div class="card"><div class="l" id="tl">Restzeit</div><div class="v" id="tm">–</div></div>
+</div>
+<div class="charts">
+ <div class="card"><div class="l">Leistung (W) – + lädt / − entlädt</div><canvas id="c1"></canvas></div>
+ <div class="card"><div class="l">Spannung (V)</div><canvas id="c2"></canvas></div>
+ <div class="card"><div class="l">Akkustand (%)</div><canvas id="c3"></canvas></div>
+ <div class="card"><div class="l">Strom (A)</div><canvas id="c4"></canvas></div>
+</div>
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+ <div class="card"><div class="l" style="margin-bottom:6px">Akku</div><table id="t1"></table></div>
+ <div class="card"><div class="l" style="margin-bottom:6px">System</div><table id="t2"></table></div>
+</div>
+<script>
+const H={p:[],v:[],c:[],a:[]},MAX=300;
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function draw(id,data,col,zero){const cv=document.getElementById(id),dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;
+ cv.width=w*dpr;cv.height=h*dpr;const g=cv.getContext('2d');g.scale(dpr,dpr);
+ if(data.length<2)return;let mn=Math.min(...data),mx=Math.max(...data);if(zero){mn=Math.min(mn,0);mx=Math.max(mx,0)}
+ if(mx-mn<1e-6){mx+=1;mn-=1}const pd=(mx-mn)*.1;mn-=pd;mx+=pd;
+ const X=i=>i/(MAX-1)*w,Y=y=>h-(y-mn)/(mx-mn)*(h-16)-8;
+ g.font='11px system-ui';g.fillStyle=css('--mut');g.strokeStyle=css('--bd');
+ g.fillText(mx.toFixed(2),2,10);g.fillText(mn.toFixed(2),2,h-2);
+ if(zero){g.beginPath();g.moveTo(0,Y(0));g.lineTo(w,Y(0));g.stroke()}
+ g.strokeStyle=css(col);g.lineWidth=2;g.beginPath();
+ data.forEach((y,i)=>{const x=X(MAX-data.length+i);i?g.lineTo(x,Y(y)):g.moveTo(x,Y(y))});g.stroke()}
+const f=(x,d=1)=>x==null?'–':x.toFixed(d);
+const row=(a,b)=>`<tr><td>${a}</td><td>${b}</td></tr>`;
+const stDe={Charging:'lädt',Discharging:'entlädt','Not charging':'angesteckt, lädt nicht',Full:'voll'};
+function push(k,v){H[k].push(v);if(H[k].length>MAX)H[k].shift()}
+async function tick(){try{const s=await (await fetch('/api')).json();
+ pct.textContent=s.percent;bar.style.width=s.percent+'%';bar.style.background=s.percent<20?css('--r'):css('--c');
+ pw.textContent=f(s.power_w);vo.textContent=f(s.voltage_v,2);cu.textContent=f(s.current_a,2);
+ st.textContent=(stDe[s.status]||s.status)+(s.ac?' · Netzteil':' · Akku');
+ const hl=s.hours_left;tl.textContent=s.status==='Charging'?'Bis voll':'Restzeit';
+ tm.textContent=hl==null?'–':`${Math.floor(hl)} h ${Math.round(hl%1*60)} min`;
+ push('p',s.power_signed_w);push('v',s.voltage_v);push('c',s.percent);push('a',s.status==='Discharging'?-s.current_a:s.current_a);
+ draw('c1',H.p,'--a',true);draw('c2',H.v,'--b');draw('c3',H.c,'--c');draw('c4',H.a,'--r',true);
+ t1.innerHTML=row('Energie',f(s.energy_wh)+' / '+f(s.full_wh)+' Wh')+row('Designkapazität',f(s.design_wh)+' Wh')
+  +row('Gesundheit',f(s.health_pct)+' %')+row('Ladezyklen',s.cycles)+row('Modell',(s.manufacturer||'')+' '+(s.model||''))
+  +row('Lademodus',s.charge_types||'–')+(s.conservation!=null?row('Conservation Mode',s.conservation?'an':'aus'):'');
+ let sy=row('Energieprofil',s.profile||'–')+row('CPU Ø Takt',f(s.cpu_mhz,0)+' MHz')+row('GPU Leistung',f(s.gpu_w)+' W');
+ for(const[k,v]of Object.entries(s.temps))sy+=row('Temp. '+k,f(v)+' °C');
+ s.usb.forEach(u=>sy+=row('USB-C '+u.name.slice(-5),u.online?`${f(u.current_a,2)} A · ${u.usb_type.match(/\[(.*?)\]/)?.[1]||''}`:'frei'));
+ t2.innerHTML=sy}catch(e){st.textContent='Server nicht erreichbar'}}
+tick();setInterval(tick,2000);
+</script></body></html>
